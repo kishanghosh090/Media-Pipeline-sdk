@@ -15,6 +15,27 @@ A simple TypeScript SDK for processing videos into HLS output variants.
 npm install mediapipeline-sdk
 ```
 
+## Requirements
+
+- Node.js 18+ and npm
+- FFmpeg installed and available in your system `PATH`
+
+Install FFmpeg:
+
+```bash
+# macOS (Homebrew)
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt update && sudo apt install -y ffmpeg
+```
+
+Verify installation:
+
+```bash
+ffmpeg -version
+```
+
 ## Quick Start
 
 ```ts
@@ -81,3 +102,7 @@ Run local dev script:
 ```bash
 npm run dev
 ```
+
+## Acknowledgments
+
+This SDK is made possible by [FFmpeg](https://ffmpeg.org/), a complete, cross-platform solution to record, convert and stream audio and video. Special thanks to the FFmpeg team for their incredible work on this essential media processing tool.
