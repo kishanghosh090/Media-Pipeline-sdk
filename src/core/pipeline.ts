@@ -17,11 +17,25 @@ export class MediaPipelineSDK {
   }
 
   async process(filePath: string) {
+    if (filePath == undefined || filePath == null || filePath.trim() === "") {
+      throw new Error("file is required");
+    }
+    if (
+      this.config.storage.baseDir == undefined ||
+      this.config.storage.baseDir == null ||
+      this.config.storage.baseDir.trim() === ""
+    ) {
+      throw new Error("base directory is required");
+    }
+
+    filePath = filePath.trim();
+    const baseDir = this.config.storage.baseDir.trim();
+
     const ext = getExtension(filePath);
 
     const id = uuid();
 
-    const outputDir = path.join(this.config.storage.baseDir, id);
+    const outputDir = path.join(baseDir, id);
 
     if ([".mp4", ".mov", ".mkv"].includes(ext)) {
       return processVideo(filePath, outputDir, this.resolutions);
