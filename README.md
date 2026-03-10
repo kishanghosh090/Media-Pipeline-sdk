@@ -50,6 +50,7 @@ async function main() {
       },
     },
     ["1080", "720", "480"],
+    true,
   );
 
   const result = await sdk.process("./samples/input.mp4");
@@ -62,12 +63,15 @@ main().catch(console.error);
 
 ## API
 
-### `new MediaPipelineSDK(config, resolutions)`
+### `new MediaPipelineSDK(config, resolutions, isCleanTheOriginalFileFromLocalPath?)`
 
 - `config.storage.type`: currently only `"local"`
 - `config.storage.baseDir`: output base directory
 - `resolutions`: string array like `["1080", "720", "480", "360"]`
   - If empty, defaults to `["720"]`
+- `isCleanTheOriginalFileFromLocalPath` (optional):
+  - `true` removes the original input file after successful processing.
+  - This option is only valid when `config.storage.type` is `"local"`.
 
 ### `sdk.process(filePath)`
 
