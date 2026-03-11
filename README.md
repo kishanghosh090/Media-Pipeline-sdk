@@ -2,6 +2,10 @@
 
 A simple TypeScript SDK for processing videos into HLS output variants and uploading to Cloudinary.
 
+## Documentation
+
+Full documentation is available at: https://media-pipeline-sdk-docs.vercel.app
+
 ## Features
 
 - Validate basic pipeline config
