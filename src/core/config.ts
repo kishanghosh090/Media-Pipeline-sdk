@@ -5,8 +5,8 @@ function validateConfig(config: PipelineConfig) {
     throw new Error("Storage configuration required");
   }
 
-  if (config.storage.type !== "local") {
-    throw new Error("Only local storage supported in v1");
+  if (config.storage.type !== "local" && config.storage.type !== "cloudinary") {
+    throw new Error("Only local and cloudinary storage supported in v2");
   }
 
   return config;

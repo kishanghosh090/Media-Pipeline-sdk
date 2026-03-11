@@ -18,9 +18,22 @@ export interface ProcessResult {
   variants: MediaVariant[];
 }
 
+export interface CloudinaryCredentials {
+  cloudName: string;
+  apiKey: string;
+  apiSecret: string;
+}
+
+export interface S3Credentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  region: string;
+  bucket: string;
+}
 export interface PipelineConfig {
   storage: {
     type: StorageType;
     baseDir: string;
+    credentials?: CloudinaryCredentials | S3Credentials;
   };
 }
