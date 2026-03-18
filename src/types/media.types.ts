@@ -29,6 +29,7 @@ export interface S3Credentials {
   secretAccessKey: string;
   region: string;
   bucket: string;
+  folderName: string;
 }
 export interface PipelineConfig {
   storage: {

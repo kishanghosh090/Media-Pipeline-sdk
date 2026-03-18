@@ -7,8 +7,12 @@ import { validateConfig } from "./config";
 import { PipelineConfig } from "../types/media.types";
 import fs from "fs";
 import { checkFileExists } from "../utils/checkFileHaveOrNot";
-import type { CloudinaryCredentials } from "../types/media.types";
+import type {
+  CloudinaryCredentials,
+  S3Credentials,
+} from "../types/media.types";
 import { uploadHLS } from "../utils/uploadHLS";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 export class MediaPipelineSDK {
   private config: PipelineConfig;
@@ -140,6 +144,171 @@ export class MediaPipelineSDK {
         }
       }
       console.error("Error processing Cloudinary upload:", error);
+      throw error;
+    }
+  }
+
+  async processS3(filePath: string) {
+    if (this.config.storage.type != "s3") {
+      throw new Error("S3 processing is only supported with S3 storage.");
+    }
+
+    if (!filePath || filePath.trim() === "") {
+      throw new Error("File path is required");
+    }
+
+    const credentials = this.config.storage.credentials as S3Credentials;
+
+    if (
+      credentials.accessKeyId == undefined ||
+      credentials.accessKeyId.trim() === ""
+    ) {
+      throw new Error("S3 access key id is required");
+    }
+
+    if (
+      credentials.secretAccessKey == undefined ||
+      credentials.secretAccessKey.trim() === ""
+    ) {
+      throw new Error("S3 secret access key is required");
+    }
+
+    if (credentials.region == undefined || credentials.region.trim() === "") {
+      throw new Error("S3 region is required");
+    }
+
+    if (credentials.bucket == undefined || credentials.bucket.trim() === "") {
+      throw new Error("S3 bucket is required");
+    }
+
+    if (
+      credentials.folderName == undefined ||
+      credentials.folderName.trim() === ""
+    ) {
+      throw new Error("S3 folder name is required");
+    }
+
+    const s3Client = new S3Client({
+      region: credentials.region.trim(),
+      credentials: {
+        accessKeyId: credentials.accessKeyId.trim(),
+        secretAccessKey: credentials.secretAccessKey.trim(),
+      },
+    });
+
+    const inputFilePath = filePath.trim();
+    const folderName = credentials.folderName.trim();
+    const bucket = credentials.bucket.trim();
+    let outputDir: string | undefined;
+
+    const toPosixPath = (value: string) => value.split(path.sep).join("/");
+
+    const getContentType = (fileName: string) => {
+      if (fileName.endsWith(".m3u8")) {
+        return "application/vnd.apple.mpegurl";
+      }
+
+      if (fileName.endsWith(".ts")) {
+        return "video/mp2t";
+      }
+
+      return "application/octet-stream";
+    };
+
+    const listFilesRecursive = async (dirPath: string): Promise<string[]> => {
+      const entries = await fs.promises.readdir(dirPath, {
+        withFileTypes: true,
+      });
+
+      const allFiles = await Promise.all(
+        entries.map(async (entry) => {
+          const fullPath = path.join(dirPath, entry.name);
+          if (entry.isDirectory()) {
+            return listFilesRecursive(fullPath);
+          }
+
+          return [fullPath];
+        }),
+      );
+
+      return allFiles.flat();
+    };
+
+    try {
+      const localProcessResult = await this.processLocal(inputFilePath);
+      outputDir = localProcessResult.outputDir;
+
+      const uuidFolder = path.basename(outputDir);
+      const folderKey = `${folderName}/`;
+      const uploadPrefix = `${folderName}/${uuidFolder}`;
+
+      // S3 does not have real directories; these placeholder objects create the folder view.
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: folderKey,
+          Body: "",
+        }),
+      );
+
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: `${uploadPrefix}/`,
+          Body: "",
+        }),
+      );
+
+      const filesToUpload = await listFilesRecursive(outputDir);
+
+      await Promise.all(
+        filesToUpload.map(async (absoluteFilePath) => {
+          const relativePath = toPosixPath(
+            path.relative(outputDir!!, absoluteFilePath),
+          );
+          const key = `${uploadPrefix}/${relativePath}`;
+
+          await s3Client.send(
+            new PutObjectCommand({
+              Bucket: bucket,
+              Key: key,
+              Body: await fs.promises.readFile(absoluteFilePath),
+              ContentType: getContentType(absoluteFilePath),
+            }),
+          );
+        }),
+      );
+
+      const masterUri = `s3://${bucket}/${uploadPrefix}/master.m3u8`;
+
+      if (
+        (await checkFileExists(outputDir)) == true &&
+        this.isCleanTheOriginalFileFromLocalPath == true
+      ) {
+        try {
+          await fs.promises.rm(outputDir, { recursive: true, force: true });
+        } catch (rmError) {
+          console.error(
+            `Failed to clean up output directory at path: ${outputDir}`,
+            rmError,
+          );
+        }
+      }
+
+      return masterUri;
+    } catch (error) {
+      if (outputDir != undefined && (await checkFileExists(outputDir))) {
+        try {
+          await fs.promises.rm(outputDir, { recursive: true, force: true });
+        } catch (rmError) {
+          console.error(
+            `Failed to clean up output directory at path: ${outputDir}`,
+            rmError,
+          );
+        }
+      }
+
+      console.error("Error processing S3 upload:", error);
       throw error;
     }
   }
