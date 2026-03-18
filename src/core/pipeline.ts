@@ -336,7 +336,11 @@ export class MediaPipelineSDK {
             ),
           );
 
-          signedLines.push(await getSignedObjectUrl(signedTargetRelativePath));
+          const signedTargetPath = signedTargetRelativePath.endsWith(".m3u8")
+            ? path.posix.join("signed", signedTargetRelativePath)
+            : signedTargetRelativePath;
+
+          signedLines.push(await getSignedObjectUrl(signedTargetPath));
         }
 
         const signedPlaylistKey = `${uploadPrefix}/signed/${playlistPath}`;
