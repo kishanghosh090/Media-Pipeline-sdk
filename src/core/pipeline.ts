@@ -12,7 +12,12 @@ import type {
   S3Credentials,
 } from "../types/media.types";
 import { uploadHLS } from "../utils/uploadHLS";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export class MediaPipelineSDK {
   private config: PipelineConfig;
@@ -199,6 +204,7 @@ export class MediaPipelineSDK {
     const inputFilePath = filePath.trim();
     const folderName = credentials.folderName.trim();
     const bucket = credentials.bucket.trim();
+    const signedUrlExpiresInSeconds = 300;
     let outputDir: string | undefined;
 
     const toPosixPath = (value: string) => value.split(path.sep).join("/");
@@ -248,6 +254,7 @@ export class MediaPipelineSDK {
           Bucket: bucket,
           Key: folderKey,
           Body: "",
+          ContentLength: 0,
         }),
       );
 
@@ -256,23 +263,27 @@ export class MediaPipelineSDK {
           Bucket: bucket,
           Key: `${uploadPrefix}/`,
           Body: "",
+          ContentLength: 0,
         }),
       );
 
       const filesToUpload = await listFilesRecursive(outputDir);
+      const relativePaths = filesToUpload.map((absoluteFilePath) =>
+        toPosixPath(path.relative(outputDir as string, absoluteFilePath)),
+      );
 
       await Promise.all(
-        filesToUpload.map(async (absoluteFilePath) => {
-          const relativePath = toPosixPath(
-            path.relative(outputDir!!, absoluteFilePath),
-          );
+        filesToUpload.map(async (absoluteFilePath, index) => {
+          const relativePath = relativePaths[index] as string;
           const key = `${uploadPrefix}/${relativePath}`;
+          const body = await fs.promises.readFile(absoluteFilePath);
 
           await s3Client.send(
             new PutObjectCommand({
               Bucket: bucket,
               Key: key,
-              Body: await fs.promises.readFile(absoluteFilePath),
+              Body: body,
+              ContentLength: body.length,
               ContentType: getContentType(absoluteFilePath),
             }),
           );
@@ -280,6 +291,77 @@ export class MediaPipelineSDK {
       );
 
       const masterUri = `s3://${bucket}/${uploadPrefix}/master.m3u8`;
+      const playlistPaths = relativePaths.filter((file) =>
+        file.endsWith(".m3u8"),
+      );
+
+      const getSignedObjectUrl = async (relativePath: string) => {
+        const objectKey = `${uploadPrefix}/${relativePath}`;
+        return getSignedUrl(
+          s3Client,
+          new GetObjectCommand({
+            Bucket: bucket,
+            Key: objectKey,
+            ResponseContentDisposition: "inline",
+          }),
+          { expiresIn: signedUrlExpiresInSeconds },
+        );
+      };
+
+      for (const playlistPath of playlistPaths) {
+        const playlistAbsolutePath = path.join(outputDir, playlistPath);
+        const playlistContent = await fs.promises.readFile(
+          playlistAbsolutePath,
+          "utf8",
+        );
+        const playlistDir = path.posix.dirname(playlistPath);
+        const signedLines: string[] = [];
+
+        for (const line of playlistContent.split(/\r?\n/)) {
+          const trimmedLine = line.trim();
+
+          if (
+            trimmedLine === "" ||
+            trimmedLine.startsWith("#") ||
+            /^https?:\/\//i.test(trimmedLine)
+          ) {
+            signedLines.push(line);
+            continue;
+          }
+
+          const signedTargetRelativePath = path.posix.normalize(
+            path.posix.join(
+              playlistDir === "." ? "" : playlistDir,
+              trimmedLine,
+            ),
+          );
+
+          signedLines.push(await getSignedObjectUrl(signedTargetRelativePath));
+        }
+
+        const signedPlaylistKey = `${uploadPrefix}/signed/${playlistPath}`;
+        const signedPlaylistBody = Buffer.from(signedLines.join("\n"), "utf8");
+
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: bucket,
+            Key: signedPlaylistKey,
+            Body: signedPlaylistBody,
+            ContentLength: signedPlaylistBody.length,
+            ContentType: "application/vnd.apple.mpegurl",
+          }),
+        );
+      }
+
+      const playbackUrl = await getSignedUrl(
+        s3Client,
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: `${uploadPrefix}/signed/master.m3u8`,
+          ResponseContentDisposition: "inline",
+        }),
+        { expiresIn: signedUrlExpiresInSeconds },
+      );
 
       if (
         (await checkFileExists(outputDir)) == true &&
@@ -295,7 +377,7 @@ export class MediaPipelineSDK {
         }
       }
 
-      return masterUri;
+      return playbackUrl || masterUri;
     } catch (error) {
       if (outputDir != undefined && (await checkFileExists(outputDir))) {
         try {
