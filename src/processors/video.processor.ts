@@ -3,6 +3,7 @@ import { runCommand } from "../utils/ffmpeg";
 import { ensureDir } from "../utils/file";
 import { HLS_PROFILES } from "../utils/hlsProfiles";
 import { ProcessResult } from "../types/media.types";
+import { hasAudioStream } from "../utils/ffprobe";
 
 export async function processVideo(
   input: string,
@@ -12,39 +13,49 @@ export async function processVideo(
   await ensureDir(outputDir);
 
   const profiles = resolutions.map((r) => HLS_PROFILES[r]);
-
   if (!profiles.length) {
     throw new Error("No valid HLS profiles");
   }
 
   const splitLabels = resolutions.map((_, i) => `[v${i}]`).join("");
-
   const splitFilter = `[0:v]split=${resolutions.length}${splitLabels}`;
-
   const scaleFilters = resolutions
     .map((r, i) => {
       const height = HLS_PROFILES[r]!!.height;
       return `[v${i}]scale=w=-2:h=${height}[v${i}out]`;
     })
     .join(";");
-
   const filterComplex = `"${splitFilter};${scaleFilters}"`;
 
-  const maps = resolutions
-    .map((_, i) => `-map "[v${i}out]" -map 0:a:0?`)
-    .join(" ");
+  // Check if input has audio
+  const hasAudio = await hasAudioStream(input);
 
-  const bitrateConfig = resolutions
-    .map((r, i) => {
-      const p = HLS_PROFILES[r]!!;
+  let maps: string;
+  let bitrateConfig: string;
+  let varStreamMap: string;
+  let audioFlags = hasAudio ? "-c:a aac -ar 48000" : "";
 
-      return `-b:v:${i} ${p.bitrate} -maxrate:v:${i} ${p.maxrate} -bufsize:v:${i} ${p.bufsize} -b:a:${i} ${p.audio}`;
-    })
-    .join(" ");
-
-  const varStreamMap = resolutions
-    .map((r, i) => `v:${i},a:${i},name:${r}p`)
-    .join(" ");
+  if (hasAudio) {
+    maps = resolutions.map((_, i) => `-map "[v${i}out]" -map 0:a:0?`).join(" ");
+    bitrateConfig = resolutions
+      .map((r, i) => {
+        const p = HLS_PROFILES[r]!!;
+        return `-b:v:${i} ${p.bitrate} -maxrate:v:${i} ${p.maxrate} -bufsize:v:${i} ${p.bufsize} -b:a:${i} ${p.audio}`;
+      })
+      .join(" ");
+    varStreamMap = resolutions
+      .map((r, i) => `v:${i},a:${i},name:${r}p`)
+      .join(" ");
+  } else {
+    maps = resolutions.map((_, i) => `-map "[v${i}out]"`).join(" ");
+    bitrateConfig = resolutions
+      .map((r, i) => {
+        const p = HLS_PROFILES[r]!!;
+        return `-b:v:${i} ${p.bitrate} -maxrate:v:${i} ${p.maxrate} -bufsize:v:${i} ${p.bufsize}`;
+      })
+      .join(" ");
+    varStreamMap = resolutions.map((r, i) => `v:${i},name:${r}p`).join(" ");
+  }
 
   const command = [
     `ffmpeg -i "${input}"`,
@@ -52,7 +63,7 @@ export async function processVideo(
     filterComplex,
     maps,
     "-c:v libx264 -preset veryfast -crf 20",
-    "-c:a aac -ar 48000",
+    audioFlags,
     bitrateConfig,
     "-g 48 -keyint_min 48 -sc_threshold 0",
     "-f hls",
@@ -63,7 +74,9 @@ export async function processVideo(
     "-master_pl_name master.m3u8",
     `-var_stream_map "${varStreamMap}"`,
     `"${outputDir}/index_%v.m3u8"`,
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   await runCommand(command);
 
