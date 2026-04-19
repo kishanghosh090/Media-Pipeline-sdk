@@ -133,6 +133,9 @@ export class MediaPipelineSDK {
             `Failed to clean up output directory at path: ${outputDir}`,
             rmError,
           );
+          throw Error(
+            `Failed to clean up output directory at path: ${outputDir}`,
+          );
         }
       }
 
@@ -145,6 +148,9 @@ export class MediaPipelineSDK {
           console.error(
             `Failed to clean up output directory at path: ${outputDir}`,
             rmError,
+          );
+          throw Error(
+            `Failed to clean up output directory at path: ${outputDir}`,
           );
         }
       }
@@ -378,6 +384,9 @@ export class MediaPipelineSDK {
             `Failed to clean up output directory at path: ${outputDir}`,
             rmError,
           );
+          throw Error(
+            `Failed to clean up output directory at path: ${outputDir}`,
+          );
         }
       }
 
@@ -390,6 +399,9 @@ export class MediaPipelineSDK {
           console.error(
             `Failed to clean up output directory at path: ${outputDir}`,
             rmError,
+          );
+          throw Error(
+            `Failed to clean up output directory at path: ${outputDir}`,
           );
         }
       }
